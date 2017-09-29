@@ -92,6 +92,7 @@ def registerFile(dir, filename):
 				tmpAuthor = Author()
 				tmpAuthor.name = tmpBook.author
 				tmpAuthor.id = tmpBook.authorId
+				tmpAuthor.image = Resource.ContentsOfURLWithFallback(url="http://covers.openlibrary.org/a/olid/" + tmpAuthor.id + "-M.jpg?default=false", fallback=R(ART))
 				authors[tmpBook.authorId] = tmpAuthor
 
 			if (len(tmpBook.summary) >= 1):
@@ -188,7 +189,6 @@ def LoadTitles():
 	
 	for bookFile in books:
 		book = books[bookFile]
-		Log.Debug("Loading book " + book.filename + " - PLUGIN EBOOKS")
 		try:
 			oc.add(
 				SeasonObject(
