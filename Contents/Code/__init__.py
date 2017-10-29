@@ -1,4 +1,5 @@
 from pdfrw import PdfReader # https://github.com/pmaupin/pdfrw/tree/8774f15b1189657e5c30079b4d658284660ceadc
+from pydblite import Base # https://github.com/PierreQuentel/PyDbLite/tree/a97f55ed867694b2f7798b7dc8267f18bbf1a2cc
 from urllib2 import urlopen
 import os, sys, json, random
 
@@ -17,6 +18,23 @@ Log.Debug("Plugin loaded - PLUGIN EBOOKS")
 books = {}
 authors = {}
 totalFiles = 0
+
+bookDB = Base(EBOOK_FOLDER + 'books.pdl')
+if bookDB.exists():
+    bookDB.open()
+
+authorDB = Base(EBOOK_FOLDER + 'authors.pdl')
+if authorDB.exists():
+    authorDB.open()
+
+
+bookDB.create("id", "file", "title", "summary", "pageCount", "imageURL", "openLibraryID", "author", mode="open")
+bookDB.create_index('id')
+bookDB.commit()
+
+authorDB.create("id", "name", "imageURL", "openLibraryID", mode="open")
+authorDB.create_index('id')
+authorDB.commit()
 
 class Book:
 	filename = "unknown.pdf"
@@ -55,6 +73,9 @@ class DirWalker(object): # based of https://ssscripting.wordpress.com/2009/03/03
 def registerFile(dir, filename):
 	global totalFiles
 	if filename.endswith(".pdf"):
+		if (bookDB(file=filename)):
+			return
+
 		try:
 			x = PdfReader(os.path.join(dir, filename))
 			
@@ -78,7 +99,7 @@ def registerFile(dir, filename):
 				tmpBook.id = jsonRes["docs"][0]["edition_key"][0]
 				tmpBook.author = jsonRes["docs"][0]["author_name"][0]
 				tmpBook.authorId = jsonRes["docs"][0]["author_key"][0]
-				tmpBook.image = Resource.ContentsOfURLWithFallback(url="http://covers.openlibrary.org/b/olid/" + tmpBook.id + "-M.jpg?default=false", fallback=R(BOOK))
+				#tmpBook.image = Resource.ContentsOfURLWithFallback(url="http://covers.openlibrary.org/b/olid/" + tmpBook.id + "-M.jpg?default=false", fallback=R(BOOK))
 
 			found = False
 			for tmpAutId in authors:
@@ -92,7 +113,7 @@ def registerFile(dir, filename):
 				tmpAuthor = Author()
 				tmpAuthor.name = tmpBook.author
 				tmpAuthor.id = tmpBook.authorId
-				tmpAuthor.image = Resource.ContentsOfURLWithFallback(url="http://covers.openlibrary.org/a/olid/" + tmpAuthor.id + "-M.jpg?default=false", fallback=R(ART))
+				#tmpAuthor.image = Resource.ContentsOfURLWithFallback(url="http://covers.openlibrary.org/a/olid/" + tmpAuthor.id + "-M.jpg?default=false", fallback=R(ART))
 				authors[tmpBook.authorId] = tmpAuthor
 
 			if (len(tmpBook.summary) >= 1):
@@ -101,6 +122,7 @@ def registerFile(dir, filename):
 			tmpBook.summary = tmpBook.summary + "Filename: " + filename
 
 			books[filename] = tmpBook
+			bookDB.insert(id=len(bookDB), file=filename, title=tmpBook.title, summary=tmpBook.summary, pageCount=tmpBook.pages, openLibraryID=tmpBook.id)
 			totalFiles = totalFiles + 1
 		except:
 			Log.Debug("Unable to read file '" + os.path.join(dir, filename) + "' - PLUGIN EBOOKS")

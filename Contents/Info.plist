@@ -34,5 +34,8 @@
 
         <key>PlexPluginCodePolicy</key>
         <string>Elevated</string>
+        
+        <key>PlexPluginMode</key>
+        <string>AlwaysOn</string>
     </dict>
 </plist>
