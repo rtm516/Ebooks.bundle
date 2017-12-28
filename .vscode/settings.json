@@ -1,0 +1,9 @@
+{
+    "python.linting.pylintArgs": [
+        "--good-names=oc,Start,MainMenu",
+        "--additional-builtins=Plugin,TVShowObject,SeasonObject,PhotoObject,route,Log,Callback,handler,ObjectContainer,DirectoryObject,EpisodeObject,R",
+        "--ignored-modules=urllib2,pdfrw,pydblite",
+        "--overgeneral-exceptions=",
+        "--disable=too-few-public-methods"
+    ]
+}
