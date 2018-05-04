@@ -6,7 +6,7 @@ import os
 import sys
 import json
 import random
-from urllib2 import urlopen
+from urllib2 import urlopen, quote
 # https://github.com/pmaupin/pdfrw/tree/8774f15b1189657e5c30079b4d658284660ceadc
 from pdfrw import PdfReader
 # https://github.com/PierreQuentel/PyDbLite/tree/a97f55ed867694b2f7798b7dc8267f18bbf1a2cc
@@ -22,6 +22,7 @@ EBOOK_FOLDER = "E:/ebooks/"
 # http://openlibrary.org/search.json?title=
 # http://openlibrary.org/search.json?author=
 
+TOTALFILES = 0
 
 class Data:
     """Stores global data
@@ -30,7 +31,6 @@ class Data:
     """
     books = {}
     authors = {}
-    totalFiles = 0
     bookDB = Base(EBOOK_FOLDER + 'books.pdl')
     authorDB = Base(EBOOK_FOLDER + 'authors.pdl')
 
@@ -50,19 +50,18 @@ Data.debug_log("Plugin loaded")
 
 if Data.bookDB.exists():
     Data.bookDB.open()
+else:
+    Data.bookDB.create("id", "file", "title", "summary", "pageCount",
+                        "imageURL", "openLibraryID", "author", mode="open")
+    Data.bookDB.create_index('id')
+    Data.bookDB.commit()
 
 if Data.authorDB.exists():
     Data.authorDB.open()
-
-
-Data.bookDB.create("id", "file", "title", "summary", "pageCount",
-                   "imageURL", "openLibraryID", "author", mode="open")
-Data.bookDB.create_index('id')
-Data.bookDB.commit()
-
-Data.authorDB.create("id", "name", "imageURL", "openLibraryID", mode="open")
-Data.authorDB.create_index('id')
-Data.authorDB.commit()
+else:
+    Data.authorDB.create("id", "name", "imageURL", "openLibraryID", mode="open")
+    Data.authorDB.create_index('id')
+    Data.authorDB.commit()   
 
 
 class Book:
@@ -89,6 +88,22 @@ class Author:
     author_id = ""
     image = R(ART)
 
+def get_url(url):
+    """URL GET request
+
+    Allows for returning of a string from the specified url
+
+    Arguments:
+        url {string} -- The url to send the request to
+
+    Returns:
+        string -- A string with the response if it was successful if not then an empty string
+    """
+    try:
+        response = urlopen(url)
+        return response.read()
+    except Exception as dummy_ex:
+        return ""
 
 def get_json_from_url(url):
     """JSON GET request
@@ -102,8 +117,7 @@ def get_json_from_url(url):
         object -- An object with the parsed json if it was successful if not then an empty object
     """
     try:
-        response = urlopen(url)
-        json_res = response.read()
+        json_res = get_url(url)
         json_obj = json.loads(json_res)
         return json_obj
     except Exception as dummy_ex:
@@ -144,10 +158,13 @@ def register_file(file_dir, filename):
         file_dir {string} -- Directory of the file
         filename {string} -- Name on disk of the file
     """
+    global TOTALFILES
     if filename.endswith(".pdf"):
-        if Data.bookDB(file=filename):
+        if len(Data.bookDB(file=filename)) >= 1:
+            Data.debug_log("Found cached file: " + filename)
             return
 
+        Data.debug_log("Getting data for: " + filename)
         try:
             pdf_data = PdfReader(os.path.join(file_dir, filename))
 
@@ -166,13 +183,14 @@ def register_file(file_dir, filename):
 
             tmp_book.author_id = rand_int
 
-            json_res = get_json_from_url(
-                "http://openlibrary.org/search.json?title=" + os.path.splitext(filename)[0])
+            url = "http://openlibrary.org/search.json?title=" + quote(os.path.splitext(filename)[0])
+            json_res = get_json_from_url(url)
             if ("docs" in json_res) and (len(json_res["docs"]) >= 1):
+                tmp_book.title = json_res["docs"][0]["title"]
                 tmp_book.book_id = json_res["docs"][0]["edition_key"][0]
                 tmp_book.author = json_res["docs"][0]["author_name"][0]
                 tmp_book.author_id = json_res["docs"][0]["author_key"][0]
-                #tmp_book.image = Resource.ContentsOfURLWithFallback(url="http://covers.openlibrary.org/b/olid/" + tmp_book.book_id + "-M.jpg?default=false", fallback=R(BOOK))
+                tmp_book.image = "http://covers.openlibrary.org/b/olid/" + tmp_book.book_id + "-M.jpg?default=false"
 
             found = False
             for tmp_auth_id in Data.authors:
@@ -186,8 +204,11 @@ def register_file(file_dir, filename):
                 tmp_author = Author()
                 tmp_author.name = tmp_book.author
                 tmp_author.author_id = tmp_book.author_id
-                #tmp_author.image = Resource.ContentsOfURLWithFallback(url="http://covers.openlibrary.org/a/olid/" + tmp_author.author_id + "-M.jpg?default=false", fallback=R(ART))
+                tmp_author.image = "http://covers.openlibrary.org/a/olid/" + tmp_author.author_id + "-M.jpg?default=false"
                 Data.authors[tmp_book.author_id] = tmp_author
+                Data.authorDB.insert(id=len(Data.authorDB), name=tmp_author.name,
+                                    openLibraryID=tmp_author.author_id, imageURL=tmp_author.image)
+                Data.authorDB.commit()
 
             if len(tmp_book.summary) >= 1:
                 tmp_book.summary = tmp_book.summary + "\n"
@@ -196,12 +217,15 @@ def register_file(file_dir, filename):
 
             Data.books[filename] = tmp_book
             Data.bookDB.insert(id=len(Data.bookDB), file=filename,
-                               title=tmp_book.title, summary=tmp_book.summary,
-                               pageCount=tmp_book.pages, openLibraryID=tmp_book.book_id)
-            Data.totalFiles = Data.totalFiles + 1
+                                title=tmp_book.title, summary=tmp_book.summary,
+                                pageCount=tmp_book.pages, openLibraryID=tmp_book.book_id,
+                                author=tmp_book.author_id, imageURL=tmp_book.image)
+            Data.bookDB.commit()
+            TOTALFILES = TOTALFILES + 1
         except Exception as dummy_ex:
             Data.debug_log("Unable to read file '" +
-                           os.path.join(file_dir, filename))
+                           os.path.join(file_dir, filename) +
+                           " (" + str(dummy_ex) + ")")
 
 
 def Start():
@@ -209,9 +233,10 @@ def Start():
 
     This is automatically run when the file is read by plex
     """
+    global TOTALFILES
     Data.debug_log("Loading books")
     DirWalker().walk(EBOOK_FOLDER, register_file)
-    Data.debug_log("Finished loading " + str(Data.totalFiles) +
+    Data.debug_log("Finished loading " + str(TOTALFILES) +
                    " books, starting")
 
     Plugin.AddViewGroup("AuthorList", viewMode="List", mediaType="items")
@@ -265,15 +290,14 @@ def load_authors():
     """
     Data.debug_log("load_authors")
     oc = ObjectContainer(title2="Authors")
-    for author_id in Data.authors:
-        author = Data.authors[author_id]
+    for author in Data.authorDB:
         try:
             oc.add(
                 TVShowObject(
-                    key=Callback(load_author, author_id=author.author_id),
-                    rating_key=author.id,
-                    title=author.name,
-                    thumb=author.image
+                    key=Callback(load_author, author_id=str(author["id"])),
+                    rating_key=str(author["id"]),
+                    title=str(author["name"]),
+                    thumb=Resource.ContentsOfURLWithFallback(str(author["imageURL"]))
                 )
             )
         except Exception as dummy_ex:
@@ -314,7 +338,7 @@ def load_author(author_id):
                     title="By " + book.author,
                     show=book.title,
                     summary=book.summary,
-                    episoddummy_excount=book.pages,
+                    episode_count=book.pages,
                     thumb=book.image
                 )
             )
@@ -339,21 +363,21 @@ def load_titles():
     Data.debug_log("load_titles")
     oc = ObjectContainer(view_group="BookList", title2="Books")
 
-    for book_file in Data.books:
-        book = Data.books[book_file]
+    for book in Data.bookDB:
         try:
             oc.add(
                 SeasonObject(
-                    key=Callback(load_book, file=book.filename),
-                    rating_key=book.filename,
-                    title="By " + book.author,
-                    show=book.title,
-                    summary=book.summary,
-                    episoddummy_excount=book.pages,
-                    thumb=book.image
+                    key=Callback(load_book, file=str(book["file"])),
+                    rating_key=str(book["file"]),
+                    title="By " + str(Data.authorDB(openLibraryID=str(book["author"]))[0]["name"]),
+                    show=str(book["title"]),
+                    summary=str(book["summary"]),
+                    episode_count=int(book["pageCount"]),
+                    thumb=Resource.ContentsOfURLWithFallback(str(book["imageURL"]), fallback=BOOK)
                 )
             )
         except Exception as dummy_ex:
+            Data.debug_log(str(dummy_ex))
             pass
 
     return oc
@@ -381,14 +405,14 @@ def load_book(file):
     oc = ObjectContainer(title2=book.title)
 
     # Start page loop
-    for pagdummy_exno in range(1, book.pages + 1):
+    for pageno in range(1, book.pages + 1):
         try:
             oc.add(
                 PhotoObject(
-                    key=book.title + str(pagdummy_exno),
-                    rating_key=book.title + str(pagdummy_exno),
-                    title="Page " + str(pagdummy_exno),
-                    summary="Page " + str(pagdummy_exno) + " of " +
+                    key=book.title + str(pageno),
+                    rating_key=book.title + str(pageno),
+                    title="Page " + str(pageno),
+                    summary="Page " + str(pageno) + " of " +
                     book.title + " by " + book.author,
                     thumb=R(ART)
                 )
